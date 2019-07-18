@@ -254,12 +254,7 @@ for (z in 1: length(pdfs)){
     # 4. Store data in table
     # ------------------------
     
-    # ----------------------------
-    # Table: Amendment Proposals
-    # ----------------------------
-    
-    # what is with pdf-docu-table?
-    
+      
     if (z == 1){
       
       
