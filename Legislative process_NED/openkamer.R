@@ -87,6 +87,9 @@ all_bill_id <- unique(all_bill_id)
 adopted_bills <- cbind(all_bill_id,all_bill_urls)
 
 
+save(adopted_bills, file = "adopted_bills_openkamer.RData")
+
+
 ###### Scraping info from bill page ----- 
 
 
@@ -116,11 +119,11 @@ bill_docs <- function(input) {
           html_attr("href")
       )
       
-      doc_id <- NA
+      doc_id <- rep(NA, length(doc_url))
       
-      proposer <- NA
+      proposer <- rep(NA, length(doc_url))
       
-      time <- NA
+      time <- rep(NA, length(doc_url))
       
       for (k in 1:length(doc_url)) {
         html <- read_html(doc_url[k])
@@ -204,6 +207,23 @@ bill_docs <- function(input) {
 
 data <- bill_docs(all_bill_urls)
 
-
 uncovered_bills <- adopted_bills[!adopted_bills[,1] %in% data[,1],]
 
+data$date  <- gsub("juni","06", data$date)
+data$date  <- gsub("juli","07", data$date)
+data$date  <- gsub("augustus","08", data$date)
+data$date  <- gsub("september","09", data$date)
+data$date  <- gsub("oktober","10", data$date)
+data$date  <- gsub("november","11", data$date)
+data$date  <- gsub("december","12", data$date)
+data$date  <- gsub("januari","01", data$date)
+data$date  <- gsub("februari","02", data$date)
+data$date  <- gsub("maart","03", data$date)
+data$date  <- gsub("april","04", data$date)
+data$date  <- gsub("mei","05", data$date)
+
+data$date <- as.Date(data$date, format='%d %m %Y')
+
+save(data, file = "bill_id.RData")
+
+load("bill_id.RData")
