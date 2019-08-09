@@ -23,6 +23,7 @@ main_url<- paste0(url,main_html[grep("Afgedaan", main_html)] %>% html_attr("href
 
 main_html <- read_html(main_url)
 
+url <- main_url
 
 get_bill_links <- function(url) {
   page <- read_html(url)
@@ -36,37 +37,38 @@ get_bill_links <- function(url) {
   page_number <- gsub("[^0-9.-]", "", page_number) %>%
     as.integer()
   
-  rel_links <- page %>%
-    html_nodes(".col-md-9") %>%
-    html_nodes("a") %>%
-    html_attr("href")
+  bill_url <- vector("list", length = page_number)
+  bill_id <- vector("list", length = page_number)
+  bill_date <- vector("list", length = page_number)
   
+  pb <- winProgressBar(
+    title = "progress bar",
+    min = 0,
+    max = page_number,
+    width = 300
+  )
   
-  keep <- str_detect(rel_links, "/wetsvoorstellen/")
-  rel_links <- rel_links[keep]
-  abs_links <- paste0("https://www.tweedekamer.nl/", rel_links)
-  
-  next_page_url <- page %>% html_node(".next") %>% html_attr("href")
-  next_page_url <-
-    paste0("https://www.tweedekamer.nl/kamerstukken/wetsvoorstellen",
-           next_page_url)
-  
-  for (i in 2:page_number) {
-    page <- read_html(next_page_url)
-    
+  for (i in seq_len(page_number)) {
     rel_links <- page %>%
       html_nodes(".col-md-9") %>%
       html_nodes("a") %>%
       html_attr("href")
     
-    
     keep <- str_detect(rel_links, "/wetsvoorstellen/")
     rel_links <- rel_links[keep]
-    page_links <- paste0("https://www.tweedekamer.nl/", rel_links)
+    bill_url[[i]] <-
+      paste0("https://www.tweedekamer.nl/", rel_links)
     
-    bill_counter <- length(abs_links) + length(page_links)
+    id <- page %>%
+      html_nodes(".card__content") %>%
+      html_nodes("span") %>%
+      html_text %>% trimws()
     
-    abs_links[((bill_counter - length(page_links))+1):bill_counter] <- page_links
+    bill_id[[i]] <- id[grep("[0-9.-]", id)]
+    
+    bill_date[[i]] <- page %>%
+      html_nodes(".card__pretitle") %>%
+      html_text %>% trimws()
     
     next_page_url <-
       page %>% html_node(".next") %>% html_attr("href")
@@ -74,15 +76,40 @@ get_bill_links <- function(url) {
       paste0("https://www.tweedekamer.nl/kamerstukken/wetsvoorstellen",
              next_page_url)
     
+    setWinProgressBar(pb, i, title = paste(round(i / page_number * 100, 0),
+                                           "% done"))
     
+    page <- read_html(next_page_url)
     
   }
   
-  return(abs_links)
+  out <- cbind(bill_id %>% unlist,
+               bill_url %>% unlist %>% as.character,
+               bill_date %>% unlist %>% as.character) %>% data.frame
+  
+  names(out) <- cbind("bill_id", "bill_url", "date")
+  
+  close(pb)
+  
+  return(out)
 }
 
 
 all_links <- get_bill_links(main_url)
+
+
+save(all_links, file = "tweede_kamer.RData")
+
+load("bill_id.RData")
+load("tweede_kamer.RData")
+
+
+openkamer_cover <- all_links[all_links$bill_id %in% data$bill_id,]
+
+if (dir.exists("./open_kamer") == FALSE) {
+  dir.create("./open_kamer") }
+
+setwd("C:/Users/Modestas-PC/Desktop/Amendments_docs/test/open_kamer")
 
 
 bill_downloader <- function(page, identifier) {
@@ -164,10 +191,13 @@ bill_downloader <- function(page, identifier) {
 
 
 
-
-doc_identifier <- c("voorstelvanwet","notavanwijziging", "amendement", "stemming" ,"stemmingen","stenogram","eindtekst","vanhetwetsvoorstel")
-
-
-bill_downloader(all_links, doc_identifier)
+doc_identifier <- c("voorstelvanwet","notavanwijziging", "amendement")
 
 
+bill_downloader(openkamer_cover$bill_url %>% as.character() , doc_identifier)
+
+downloaded <- list.files()
+
+undownloaded_bills <- openkamer_cover[!openkamer_cover$bill_url %in% downloaded,]
+
+bill_downloader(undownloaded_bills$input_url, doc_identifier)
