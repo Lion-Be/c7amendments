@@ -4,11 +4,12 @@ setwd("C:/Users/Modestas-PC/Desktop/Amendments_docs/test")
 
 library(httr)
 library(rvest)
-library(stringr)
 library(dplyr)
 library(XML)
+library(stringr)
+library(epitrix)
 
-#### Reading URL ------
+#### Reading URL for finished and adopted bills ------
 
 url <- "https://www.openkamer.org/wetsvoorstellen/?title=&dossier_id=&status=AAN&wetsvoorstel_submitter_party=&wetsvoorstel_submitter=&submitter="
 
@@ -47,16 +48,15 @@ get_bill_links <- function(url) {
   return(abs_links)
 }
 
-all_bill_urls <- lapply(seq_len(page_number), function(i) {
+adopted_bill_urls <- lapply(seq_len(page_number), function(i) {
   url <- paste0("https://www.openkamer.org/wetsvoorstellen/?dossier_id=&status=AAN&submitter=&wetsvoorstel_submitter=&title=&wetsvoorstel_submitter_party=&page=", i)
   get_bill_links(url)
 }) %>% unlist
 
-all_bill_urls <- unique(all_bill_urls)
+adopted_bill_urls <- unique(adopted_bill_urls)
 
 
-
-##### Exctracting all bill id---- 
+##### Exctracting bill id ---- 
 
 get_bill_id <- function(url) {
   page <- read_html(url)
@@ -76,22 +76,43 @@ get_bill_id <- function(url) {
 }
 
 
-all_bill_id <- lapply(seq_len(page_number), function(i) {
+adopted_bill_id <- lapply(seq_len(page_number), function(i) {
   url <- paste0("https://www.openkamer.org/wetsvoorstellen/?dossier_id=&status=AAN&submitter=&wetsvoorstel_submitter=&title=&wetsvoorstel_submitter_party=&page=", i)
   get_bill_id(url)
 }) %>% unlist
 
-all_bill_id <- unique(all_bill_id)
+adopted_bill_id <- unique(adopted_bill_id)
 
 
-adopted_bills <- cbind(all_bill_id,all_bill_urls)
+adopted_bills <- cbind(adopted_bill_id,adopted_bill_urls)  %>% as.data.frame
+
+adopted_bills$adopted <- 1
+
+names(adopted_bills)[1:2] <- c("bill_id","url")
+
+#### rejected bills ------ 
 
 
-save(adopted_bills, file = "adopted_bills_openkamer.RData")
+url <- "https://www.openkamer.org/wetsvoorstellen/?title=&dossier_id=&status=VER&wetsvoorstel_submitter_party=&wetsvoorstel_submitter=&submitter="
 
+
+baseline_html <- read_html(url)
+
+rejected_bill_urls <- get_bill_links(url)
+
+rejected_bill_id <- get_bill_id(url)
+
+rejected_bills <- cbind(rejected_bill_id,rejected_bill_urls)  %>% as.data.frame()
+
+rejected_bills$adopted <- 0
+
+names(rejected_bills)[1:2] <- c("bill_id","url")
+
+all_bills <- rbind(adopted_bills,rejected_bills)
+
+save(all_bills, file = "bills_openkamer.RData")
 
 ###### Scraping info from bill page ----- 
-
 
 bill_docs <- function(input) {
   id <- vector("list", length(input))
@@ -99,10 +120,12 @@ bill_docs <- function(input) {
   result <- vector("list", length(input))
   date <- vector("list", length(input))
   proposer_name <- vector("list", length(input))
+  type <- vector("list", length(input))
+  
   
   for (i in seq_along(input)) {
     tryCatch({
-      url <- input[i]
+      url <- input[i] %>% as.character
       
       main_html <- read_html(url)
       
@@ -113,7 +136,7 @@ bill_docs <- function(input) {
       
       doc_url <- paste0(
         "https://www.openkamer.org",
-        changes[grep(".text-success|.text-danger", changes)] %>%
+        changes[grep(".text-success|.text-danger|Motie|Amendement", changes)] %>%
           html_node(".kamertuk-id-timeline-container") %>%
           html_node("a") %>%
           html_attr("href")
@@ -125,10 +148,12 @@ bill_docs <- function(input) {
       
       time <- rep(NA, length(doc_url))
       
+      doc_type <- rep(NA, length(doc_url))
+      
       for (k in 1:length(doc_url)) {
         html <- read_html(doc_url[k])
         
-        if (grepl("AMENDEMENT",
+        if (grepl("AMENDEMENT|MOTIE",
                   html %>% html_node(".stuktitel") %>% html_text) == T) {
           doc_id[k]  <-  gsub(
             "ID: ",
@@ -150,30 +175,59 @@ bill_docs <- function(input) {
               html_text
           )
           
-          proposer[k] <-  html %>%
-            html_node(
-              "body > div.container > div:nth-child(3) > div > h5:nth-child(2) > a:nth-child(1)"
-            ) %>%
-            html_text
+          proposer[k] <-  gsub(
+            "(?<=[\\s])\\s*|^\\s+|\\s+$|\n|.*:",
+            "",
+            html %>%
+              html_node("body > div.container > div:nth-child(3) > div > h5:nth-child(2)") %>%
+              html_text,
+            perl = T
+          )
+          
+         if(grepl("AMENDEMENT",
+                html %>% html_node(".stuktitel") %>% html_text) == T){
+           
+           
+           doc_type[k] <- "amendment"
+           
+         }
+          
+          if(grepl("AMENDEMENT",
+                   html %>% html_node(".stuktitel") %>% html_text) == T){
+            
+            
+            doc_type[k] <- "amendment"
+            
+          }
+          
+          if(grepl("MOTIE",
+                   html %>% html_node(".stuktitel") %>% html_text) == T){
+            
+            
+            doc_type[k] <- "motion"
+            
+          }
+          
         }
         
       }
       
-      doc_id <- na.omit(doc_id)
-      time <- na.omit(time)
-      proposer <- na.omit(proposer)
-      
+
       success <-
         changes[grep(".text-success", changes)] %>% html_node("a") %>% html_attr("id")
       
-      adopted <- ifelse((doc_id %in% success == T), 1, 0)
+      failure <-
+        changes[grep(".text-danger", changes)] %>% html_node("a") %>% html_attr("id")
       
-      id[[i]] <- doc_id
+      adopted <- ifelse((doc_id %in% success == T), 1, 
+                        ifelse((doc_id %in% failure == T), 0, "NO INFO"))
+      
+      id[[i]] <- gsub("-","_",doc_id)
       bill_id[[i]] <- gsub("-.*", "", doc_id)
       result[[i]] <- adopted
       proposer_name[[i]] <- proposer
       date[[i]] <- time
-      
+      type[[i]] <- doc_type
       
     },
     
@@ -188,15 +242,17 @@ bill_docs <- function(input) {
     id %>% unlist,
     result %>% unlist,
     date %>% unlist,
-    proposer_name %>% unlist
-  ) %>% as.data.frame
+    proposer_name %>% unlist,
+    type %>% unlist
+  ) %>% as.data.frame %>% na.omit
   
   names(out) <-
     c("bill_id",
-      "amendment_id",
-      "adopted",
+      "document_id",
+      "document_adopted",
       "date",
-      "proposer_name")
+      "proposer_name",
+      "document_type")
   
   return(out)
   
@@ -205,9 +261,7 @@ bill_docs <- function(input) {
 
 ###### saving data from openkamer.org-----
 
-data <- bill_docs(all_bill_urls)
-
-uncovered_bills <- adopted_bills[!adopted_bills[,1] %in% data[,1],]
+data <- bill_docs(all_bills[,2])
 
 data$date  <- gsub("juni","06", data$date)
 data$date  <- gsub("juli","07", data$date)
@@ -224,6 +278,6 @@ data$date  <- gsub("mei","05", data$date)
 
 data$date <- as.Date(data$date, format='%d %m %Y')
 
-save(data, file = "bill_id.RData")
+save(data, file = "bill_data(openkamer).RData")
 
-load("bill_id.RData")
+load("bill_data(openkamer).RData")
