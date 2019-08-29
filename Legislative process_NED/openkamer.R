@@ -7,7 +7,7 @@ library(rvest)
 library(dplyr)
 library(XML)
 library(stringr)
-library(epitrix)
+
 
 #### Reading URL for finished and adopted bills ------
 
